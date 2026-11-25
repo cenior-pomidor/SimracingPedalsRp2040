@@ -1,0 +1,21 @@
+# Pico build artifacts
+build/
+*.bin
+*.hex
+*.elf
+*.uf2
+!firmware/dist/*.uf2
+*.map
+*.dis
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# VS Code / IDE
+.vscode/
+.idea/
