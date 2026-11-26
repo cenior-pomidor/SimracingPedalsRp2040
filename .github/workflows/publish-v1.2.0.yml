@@ -1,0 +1,27 @@
+name: Publish verified SimPedal 1.2.0 assets
+on:
+  push:
+    branches: [codex/publish-v1.2.0]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified build and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: cenior-pomidor/SimracingPedalsRp2040
+        run: |
+          set -euo pipefail
+          base=https://raw.githubusercontent.com/cenior-pomidor/SimracingPedalsRp2040/c2ffbf1fbf8e97ff06ed71bac09aa30e629f94e5
+          curl --fail --location "$base/configurator/dist/SimPedal_Configurator.exe" -o SimPedal_Configurator.exe
+          curl --fail --location "$base/firmware/dist/pedal_brake.uf2" -o pedal_brake.uf2
+          curl --fail --location "$base/gerber/SimPedal_Brake_Carrier_v1.2_Gerber.zip" -o SimPedal_Brake_Carrier_v1.2_Gerber.zip
+          sha256sum --check <<'CHECKSUMS'
+          9b8d82ebd6fe008b5267f40659b9fbf033bbc19f95f399005ee4002040ff3d5f  SimPedal_Configurator.exe
+          33e34206b99ce5ac1f4b81f1d797b500579637531126efab6d1fb0cbef5f98bd  pedal_brake.uf2
+          ba1bfd42c6cbc72df7dfc06319ec6afb0bda3c14558e7a9655eba26a873f7c09  SimPedal_Brake_Carrier_v1.2_Gerber.zip
+          CHECKSUMS
+          gh release upload v1.2.0 SimPedal_Configurator.exe pedal_brake.uf2 SimPedal_Brake_Carrier_v1.2_Gerber.zip --clobber
+          gh release edit v1.2.0 --draft=false --latest
