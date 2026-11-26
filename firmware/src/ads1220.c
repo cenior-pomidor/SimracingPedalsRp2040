@@ -51,10 +51,8 @@ bool ads1220_init(ads1220_t *dev) {
     ads1220_write_reg(dev, 2, ADS1220_REG2_CONFIG);
     ads1220_write_reg(dev, 3, ADS1220_REG3_CONFIG);
 
-    // Проверка записи регистра 0
-    uint8_t readback = ads1220_read_reg(dev, 0);
-    if (readback != ADS1220_REG0_CONFIG) {
-        return false;
+    for (uint8_t reg = 0; reg < 4; reg++) {
+        if (ads1220_read_reg(dev, reg) != dev->reg_shadow[reg]) return false;
     }
 
     // Запуск непрерывного преобразования

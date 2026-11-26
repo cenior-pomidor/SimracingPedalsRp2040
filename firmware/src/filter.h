@@ -16,7 +16,8 @@ extern "C" {
 typedef enum {
     CURVE_LINEAR = 0,       // Линейная зависимость
     CURVE_PROGRESSIVE = 1,  // Прогрессивная (квадратичная, мягкое начало)
-    CURVE_DEGRESSIVE = 2    // Дегрессивная (корень квадратный, быстрый начальный отклик)
+    CURVE_DEGRESSIVE = 2,   // Дегрессивная (корень квадратный, быстрый начальный отклик)
+    CURVE_CUSTOM = 3
 } pedal_curve_t;
 
 // Типы фильтров очистки сигнала от шума
@@ -88,7 +89,8 @@ int32_t filter_update(pedal_filter_t *f, int32_t raw_val, int32_t cal_span);
 
 // Маппинг значения АЦП в диапазон HID 0..65535 с учетом калибровки, мертвой зоны и кривой
 uint16_t map_to_output(int32_t raw_val, int32_t cal_min, int32_t cal_max,
-                       uint16_t deadzone, uint8_t curve_type, uint8_t inverted);
+                       uint16_t deadzone, uint8_t curve_type, uint8_t inverted,
+                       const uint8_t points[3]);
 
 #ifdef __cplusplus
 }

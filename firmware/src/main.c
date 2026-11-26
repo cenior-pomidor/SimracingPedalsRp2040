@@ -41,7 +41,9 @@ int main(void) {
 
     // Инициализация АЦП ADS1220
     bool adc_ok = ads1220_init(&adc_dev);
-    (void)adc_ok;
+    bool sample_valid = false;
+    uint32_t last_sample_us = time_us_32();
+    uint32_t last_init_us = last_sample_us;
 
     last_hid_send_us = time_us_32();
 
@@ -50,9 +52,21 @@ int main(void) {
         tud_task();
 
         // 2. Опрос АЦП при готовности нового измерения
-        if (ads1220_data_ready(&adc_dev)) {
+        uint32_t now_us = time_us_32();
+        if (adc_ok && now_us - last_sample_us > 150000) {
+            adc_ok = sample_valid = false;
+            current_brake_force = 0;
+        }
+        if (!adc_ok && now_us - last_init_us >= 2000000) {
+            adc_ok = ads1220_init(&adc_dev);
+            last_sample_us = last_init_us = time_us_32();
+            if (adc_ok) filter_reset(&filter);
+        }
+        if (adc_ok && ads1220_data_ready(&adc_dev)) {
             int32_t new_sample = 0;
             if (ads1220_read_data(&adc_dev, &new_sample)) {
+                sample_valid = true;
+                last_sample_us = time_us_32();
                 raw_adc_value = new_sample;
                 int32_t cal_span = config.cal_max - config.cal_min;
                 if (cal_span < 0) cal_span = -cal_span;
@@ -67,13 +81,13 @@ int main(void) {
                     config.cal_max,
                     config.deadzone,
                     config.curve_type,
-                    config.inverted
+                    config.inverted, config.curve_points
                 );
             }
         }
 
         // 3. Отправка отчета HID с частотой 1000 Гц (каждые 1 мс)
-        uint32_t now_us = time_us_32();
+        now_us = time_us_32();
         if ((now_us - last_hid_send_us) >= 1000) {
             last_hid_send_us = now_us;
 
@@ -86,7 +100,7 @@ int main(void) {
         }
 
         // 4. Обработка команд протокола через виртуальный COM-порт и передача телеметрии
-        protocol_task(raw_adc_value, filtered_adc_value, current_brake_force, &config, &filter);
+        protocol_task(raw_adc_value, filtered_adc_value, current_brake_force, sample_valid, &config, &filter);
     }
 
     return 0;

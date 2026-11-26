@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['c:/projects/rp2040pedals/configurator/pedal_configurator.py'],
+    ['pedal_configurator.py'],
     pathex=[],
     binaries=[],
     datas=[],

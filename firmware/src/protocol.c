@@ -11,6 +11,7 @@ static char rx_line[RX_BUFFER_SIZE];
 static uint16_t rx_index = 0;
 bool protocol_stream_active = false;
 static uint32_t last_stream_time_ms = 0;
+static uint32_t last_fault_ms;
 
 // Отправка строки в виртуальный COM-порт
 static void cdc_send_string(const char *str) {
@@ -26,7 +27,22 @@ void protocol_init(void) {
     last_stream_time_ms = 0;
 }
 
-static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_raw,
+// Разбираем все три точки до изменения действующей настройки.
+static bool parse_points(const char *s, uint8_t points[3]) {
+    for (int i = 0; i < 3; i++) {
+        if (*s < '0' || *s > '9') return false;
+        char *end;
+        unsigned long value = strtoul(s, &end, 10);
+        if (value > 100 || (i && value < points[i-1])) return false;
+        points[i] = (uint8_t)value;
+        if (i == 2) return *end == '\0';
+        if (*end != ',') return false;
+        s = end + 1;
+    }
+    return false;
+}
+
+static void parse_command(char *cmd, bool adc_ok, int32_t filtered_raw,
                           uint16_t current_force, pedal_config_t *cfg, pedal_filter_t *flt) {
     char tx_buf[TX_BUFFER_SIZE];
 
@@ -38,7 +54,11 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
 
     // CMD:PING
     if (strcmp(cmd, "CMD:PING") == 0) {
-        cdc_send_string("RSP:PONG:SimPedal:v1.1\r\n");
+        cdc_send_string("RSP:PONG:SimPedal:v1.2\r\n");
+    }
+    else if (!adc_ok && (strcmp(cmd, "CMD:GET_RAW") == 0 || strcmp(cmd, "CMD:GET_FORCE") == 0 ||
+                        strcmp(cmd, "CMD:CAL_MIN") == 0 || strcmp(cmd, "CMD:CAL_MAX") == 0)) {
+        cdc_send_string("RSP:ERR:ADC_OFFLINE\r\n");
     }
     // CMD:GET_RAW
     else if (strcmp(cmd, "CMD:GET_RAW") == 0) {
@@ -55,7 +75,8 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
         snprintf(tx_buf, sizeof(tx_buf),
                  "RSP:CONFIG:{\"cal_min\":%ld,\"cal_max\":%ld,\"deadzone\":%u,"
                  "\"filter_size\":%u,\"filter_type\":%u,\"spike_filter\":%u,"
-                 "\"curve_type\":%u,\"inverted\":%u,\"sample_rate\":330,\"version\":%u}\r\n",
+                 "\"curve_type\":%u,\"inverted\":%u,\"sample_rate\":330,\"version\":%u,"
+                 "\"curve_points\":[%u,%u,%u],\"adc_ok\":%u}\r\n",
                  (long)cfg->cal_min,
                  (long)cfg->cal_max,
                  (unsigned int)cfg->deadzone,
@@ -64,7 +85,8 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
                  (unsigned int)cfg->spike_filter,
                  (unsigned int)cfg->curve_type,
                  (unsigned int)cfg->inverted,
-                 (unsigned int)cfg->version);
+                 (unsigned int)cfg->version, cfg->curve_points[0], cfg->curve_points[1],
+                 cfg->curve_points[2], adc_ok ? 1u : 0u);
         cdc_send_string(tx_buf);
     }
     // CMD:CAL_MIN (калибровка минимума по сглаженному значению)
@@ -122,13 +144,25 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
         snprintf(tx_buf, sizeof(tx_buf), "RSP:OK:SPIKE_FILTER:%u\r\n", cfg->spike_filter);
         cdc_send_string(tx_buf);
     }
-    // CMD:SET_CURVE:<value> (0..2)
+    // CMD:SET_CURVE:<режим>[,<выход25>,<выход50>,<выход75>].
+    // Сначала проверяем профиль целиком. Старые клиенты передают только режим.
     else if (strncmp(cmd, "CMD:SET_CURVE:", 14) == 0) {
-        int cv = atoi(cmd + 14);
-        if (cv < 0) cv = 0;
-        if (cv > 2) cv = 2;
-        cfg->curve_type = (uint8_t)cv;
-        snprintf(tx_buf, sizeof(tx_buf), "RSP:OK:CURVE:%u\r\n", cfg->curve_type);
+        const char *args = cmd + 14;
+        if (args[0] < '0' || args[0] > '0' + CURVE_CUSTOM ||
+            (args[1] != '\0' && args[1] != ',')) {
+            cdc_send_string("RSP:ERR:CURVE\r\n");
+            return;
+        }
+        if (args[1] == ',') {
+            uint8_t points[3];
+            if (!parse_points(args + 2, points)) {
+                cdc_send_string("RSP:ERR:CURVE_POINTS\r\n");
+                return;
+            }
+            memcpy(cfg->curve_points, points, sizeof(points));
+        }
+        cfg->curve_type = (uint8_t)(args[0] - '0');
+        snprintf(tx_buf, sizeof(tx_buf), "RSP:OK:CURVE:%s\r\n", args);
         cdc_send_string(tx_buf);
     }
     // CMD:SET_INVERT:<value> (0 или 1)
@@ -158,6 +192,7 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
     // CMD:STREAM_ON
     else if (strcmp(cmd, "CMD:STREAM_ON") == 0) {
         protocol_stream_active = true;
+        last_fault_ms = to_ms_since_boot(get_absolute_time()) - 500;
     }
     // CMD:STREAM_OFF
     else if (strcmp(cmd, "CMD:STREAM_OFF") == 0) {
@@ -168,10 +203,9 @@ static void parse_command(char *cmd, int32_t unfiltered_raw, int32_t filtered_ra
         cdc_send_string(tx_buf);
     }
 
-    (void)unfiltered_raw;
 }
 
-void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t current_force,
+void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t current_force, bool adc_ok,
                    pedal_config_t *cfg, pedal_filter_t *flt) {
     // 1. Обработка входящих команд CDC
     while (tud_cdc_available()) {
@@ -179,7 +213,7 @@ void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t curren
         if (ch == '\n' || ch == '\r') {
             if (rx_index > 0) {
                 rx_line[rx_index] = '\0';
-                parse_command(rx_line, unfiltered_raw, filtered_raw, current_force, cfg, flt);
+                parse_command(rx_line, adc_ok, filtered_raw, current_force, cfg, flt);
                 rx_index = 0;
             }
         } else {
@@ -194,6 +228,13 @@ void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t curren
     // 2. Потоковая передача телеметрии ~100 Гц: DAT:<filtered_raw>,<force>,<unfiltered_raw>
     if (protocol_stream_active && tud_cdc_connected()) {
         uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+        if (!adc_ok) {
+            if (now_ms - last_fault_ms >= 500) {
+                cdc_send_string("STA:ADC:OFFLINE\r\n");
+                last_fault_ms = now_ms;
+            }
+            return;
+        }
         if (now_ms - last_stream_time_ms >= 10) {
             last_stream_time_ms = now_ms;
             char stream_buf[80];

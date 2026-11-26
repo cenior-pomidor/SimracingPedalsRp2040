@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
 
+# Модуль, для которого разведена несущая плата
+set(PICO_BOARD waveshare_rp2040_zero CACHE STRING "RP2040 board")
+
 # Импорт Pico SDK
 include(pico_sdk_import.cmake)
 
@@ -38,6 +41,8 @@ target_link_libraries(pedal_brake
 # Отключаем встроенный stdio вывод в USB и UART, так как используем кастомный TinyUSB стек CDC+HID
 pico_enable_stdio_usb(pedal_brake 0)
 pico_enable_stdio_uart(pedal_brake 0)
+
+pico_set_program_version(pedal_brake "1.2")
 
 # Генерация выходных файлов (.uf2, .hex, .bin, .map)
 pico_add_extra_outputs(pedal_brake)

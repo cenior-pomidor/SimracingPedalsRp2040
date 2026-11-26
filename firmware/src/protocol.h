@@ -14,7 +14,7 @@ extern "C" {
 void protocol_init(void);
 
 // Периодическая обработка команд CDC и потоковая отправка телеметрии
-void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t current_force,
+void protocol_task(int32_t unfiltered_raw, int32_t filtered_raw, uint16_t current_force, bool adc_ok,
                    pedal_config_t *cfg, pedal_filter_t *flt);
 
 // Флаг активной потоковой передачи данных

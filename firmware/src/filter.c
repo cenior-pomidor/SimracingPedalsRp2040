@@ -109,6 +109,7 @@ void filter_configure(pedal_filter_t *f, uint8_t type, uint8_t size, uint8_t spi
     if (size > FILTER_MAX_SIZE) size = FILTER_MAX_SIZE;
     uint8_t sf = spike_filter ? 1 : 0;
 
+    bool biquad_changed = type == FILTER_TYPE_BIQUAD && (f->type != type || f->size != size);
     bool need_buffer_reset = (f->type != type) || (f->size != size && (type == FILTER_TYPE_SMA || type == FILTER_TYPE_MEDIAN));
     bool reset_spike = (f->spike_filter != sf);
 
@@ -140,7 +141,7 @@ void filter_configure(pedal_filter_t *f, uint8_t type, uint8_t size, uint8_t spi
 
     recalculate_params(f);
 
-    if (f->initialized && type == FILTER_TYPE_BIQUAD && need_buffer_reset) {
+    if (f->initialized && biquad_changed) {
         f->bq_z1 = f->last_output * (1.0 - f->bq_b0);
         f->bq_z2 = f->last_output * (f->bq_b2 - f->bq_a2);
     }
@@ -288,7 +289,8 @@ int32_t filter_update(pedal_filter_t *f, int32_t raw_val, int32_t cal_span) {
 
 // Маппинг сырого значения АЦП в диапазон HID 0..65535 с учетом калибровки, мертвой зоны и кривой
 uint16_t map_to_output(int32_t raw_val, int32_t cal_min, int32_t cal_max,
-                       uint16_t deadzone, uint8_t curve_type, uint8_t inverted) {
+                       uint16_t deadzone, uint8_t curve_type, uint8_t inverted,
+                       const uint8_t points[3]) {
     if (cal_max == cal_min) {
         return 0;
     }
@@ -320,6 +322,15 @@ uint16_t map_to_output(int32_t raw_val, int32_t cal_min, int32_t cal_max,
         case CURVE_DEGRESSIVE:
             shaped = sqrtf(effective);
             break;
+        case CURVE_CUSTOM: {
+            float position = effective * 4.0f;
+            int segment = (int)position;
+            if (segment >= 4) return 65535;
+            float lo = segment == 0 ? 0 : points[segment - 1];
+            float hi = segment == 3 ? 100 : points[segment];
+            shaped = (lo + (hi - lo) * (position - segment)) / 100.0f;
+            break;
+        }
         case CURVE_LINEAR:
         default:
             shaped = effective;
