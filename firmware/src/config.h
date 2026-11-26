@@ -9,21 +9,22 @@ extern "C" {
 #endif
 
 #define CONFIG_MAGIC    0xBEEF1234
-#define CONFIG_VERSION  2
+#define CONFIG_VERSION  3
 
 // Структура конфигурации педали, сохраняемая во Flash память (ровно 32 байта)
 typedef struct __attribute__((packed)) {
     uint32_t magic;         // Магическое число 0xBEEF1234
-    uint32_t version;       // Версия структуры конфигурации (2)
+    uint32_t version;       // Версия структуры конфигурации
     int32_t  cal_min;       // Значение АЦП при отпущенной педали
     int32_t  cal_max;       // Значение АЦП при максимально нажатой педали
     uint16_t deadzone;      // Мертвая зона: 0..10000 (0.00%..100.00%)
     uint8_t  filter_size;   // Сила фильтрации: 1..32 (1 = выкл)
-    uint8_t  curve_type;    // 0 = линейная, 1 = прогрессивная, 2 = дегрессивная
+    uint8_t  curve_type;    // 0 = линейная, 1 = прогрессивная, 2 = дегрессивная, 3 = пользовательская
     uint8_t  inverted;      // 0 = нормальная, 1 = инвертированная
     uint8_t  filter_type;   // 0=SMA, 1=EMA, 2=Median, 3=Biquad, 4=Kalman, 5=OneEuro
     uint8_t  spike_filter;  // 0 = выкл, 1 = пре-фильтр анти-глитч (медиана x3)
-    uint8_t  reserved[5];   // Резерв для выравнивания
+    uint8_t  curve_points[3]; // Выход в % при 25, 50 и 75% хода после мёртвой зоны
+    uint8_t  reserved[2];   // Резерв для выравнивания
     uint32_t crc32;         // Контрольная сумма CRC-32
 } pedal_config_t;
 

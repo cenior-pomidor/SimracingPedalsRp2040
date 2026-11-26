@@ -19,7 +19,7 @@ import math
 
 GERBER_DIR = os.path.join(os.path.dirname(__file__), "..", "gerber")
 PCB_DIR = os.path.join(os.path.dirname(__file__), "..", "pcb")
-PROJECT_NAME = "SimPedal_Brake_Carrier_v1.0"
+PROJECT_NAME = "SimPedal_Brake_Carrier_v1.2"
 MIN_CLEARANCE_MM = 0.20
 
 
@@ -102,10 +102,9 @@ def parse_drill_holes(filepath: str):
             if m_sel:
                 current_tool = int(m_sel.group(1))
                 continue
-            m_xy = re.match(r"X([-\d]+)Y([-\d]+)", line)
+            m_xy = re.fullmatch(r"X(-?\d+(?:\.\d*)?)Y(-?\d+(?:\.\d*)?)", line)
             if m_xy and current_tool is not None:
-                x = float(m_xy.group(1)) / 1000.0
-                y = float(m_xy.group(2)) / 1000.0
+                x, y = map(float, m_xy.groups())
                 holes.append((x, y, tools.get(current_tool, 1.0)))
     return holes
 
@@ -212,10 +211,10 @@ def seg_to_seg_clearance(s1: dict, s2: dict) -> float:
     return dist_seg_to_seg(s1["p1"], s1["p2"], s2["p1"], s2["p2"]) - (s1["w"] + s2["w"]) / 2.0
 
 
-def verify_pcb(render_dir: str | None = None) -> bool:
-    gtl_path = os.path.join(GERBER_DIR, f"{PROJECT_NAME}-F_Cu.gtl")
-    gbl_path = os.path.join(GERBER_DIR, f"{PROJECT_NAME}-B_Cu.gbl")
-    drl_path = os.path.join(GERBER_DIR, f"{PROJECT_NAME}.drl")
+def verify_pcb(render_dir: str | None = None, gerber_dir=GERBER_DIR) -> bool:
+    gtl_path = os.path.join(gerber_dir, f"{PROJECT_NAME}-F_Cu.gtl")
+    gbl_path = os.path.join(gerber_dir, f"{PROJECT_NAME}-B_Cu.gbl")
+    drl_path = os.path.join(gerber_dir, f"{PROJECT_NAME}.drl")
     net_path = os.path.join(PCB_DIR, "netlist_expected.json")
 
     top_segs, top_pads = parse_gerber_primitives(gtl_path, "F_Cu")
@@ -301,10 +300,12 @@ def verify_pcb(render_dir: str | None = None) -> bool:
                 has_drill = any(math.hypot(hx - px, hy - py) < 0.02 for hx, hy, _ in holes)
                 if not has_drill:
                     errors.append(f"MISSING DRILL HOLE for {net} pin {pin['label']} at ({px:.2f}, {py:.2f})")
-                for cn in copper_nodes:
-                    if cn["type"] == "pad" and math.hypot(cn["data"]["x"] - px, cn["data"]["y"] - py) < 0.02:
-                        matched_id = cn["id"]
-                        break
+                sided = {cn["layer"]: cn["id"] for cn in copper_nodes if cn["type"] == "pad"
+                         and math.hypot(cn["data"]["x"] - px, cn["data"]["y"] - py) < 0.02}
+                if "F_Cu" in sided and "B_Cu" in sided:
+                    matched_id = sided["F_Cu"]
+                    if find(matched_id) != find(sided["B_Cu"]):
+                        errors.append(f"UNCONNECTED LAYERS at {pin['label']}")
             else:
                 for cn in copper_nodes:
                     if cn["type"] == "pad" and cn["layer"] == player and \

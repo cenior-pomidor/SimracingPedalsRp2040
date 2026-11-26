@@ -5,6 +5,9 @@
 #include "hardware/sync.h"
 #include <string.h>
 
+_Static_assert(sizeof(pedal_config_t) == 32, "Existing flash records are 32 bytes");
+static const uint8_t linear_points[3] = {25, 50, 75};
+
 // Расположение сектора настроек во Flash-памяти (последний сектор 4КБ)
 #define FLASH_TARGET_OFFSET  (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 
@@ -36,6 +39,7 @@ void config_set_defaults(pedal_config_t *cfg) {
     cfg->cal_max = 500000;
     cfg->deadzone = 100;             // 1.00% мертвая зона
     cfg->filter_size = 8;            // Умеренная фильтрация
+    memcpy(cfg->curve_points, linear_points, sizeof(linear_points));
     cfg->curve_type = CURVE_LINEAR;  // Линейная кривая
     cfg->inverted = 0;
     cfg->filter_type = FILTER_TYPE_ONE_EURO; // Современный адаптивный 1-Euro фильтр по умолчанию
@@ -49,32 +53,38 @@ bool config_load(pedal_config_t *cfg) {
     pedal_config_t loaded;
     memcpy(&loaded, flash_ptr, sizeof(pedal_config_t));
 
-    if (loaded.magic != CONFIG_MAGIC || (loaded.version != 1 && loaded.version != CONFIG_VERSION)) {
-        config_set_defaults(cfg);
+    if (loaded.magic != CONFIG_MAGIC || (loaded.version < 1 || loaded.version > CONFIG_VERSION)) {
         return false;
     }
 
     uint32_t calculated_crc = config_calc_crc(&loaded);
     if (calculated_crc != loaded.crc32) {
-        config_set_defaults(cfg);
         return false;
     }
 
     // Мягкая миграция с конфигурации v1 (сохраняет калибровку пользователя)
     if (loaded.version == 1) {
-        loaded.version = CONFIG_VERSION;
         loaded.filter_type = FILTER_TYPE_SMA;
         loaded.spike_filter = 0;
+    }
+    if (loaded.version < 3) {
+        loaded.version = CONFIG_VERSION;
+        memcpy(loaded.curve_points, linear_points, sizeof(linear_points));
         memset(loaded.reserved, 0, sizeof(loaded.reserved));
-        loaded.crc32 = config_calc_crc(&loaded);
+        if (loaded.curve_type > CURVE_DEGRESSIVE) loaded.curve_type = CURVE_LINEAR;
     }
 
     if (loaded.filter_size < 1 || loaded.filter_size > FILTER_MAX_SIZE) loaded.filter_size = 8;
     if (loaded.deadzone > 10000) loaded.deadzone = 100;
-    if (loaded.curve_type > 2) loaded.curve_type = 0;
+    if (loaded.curve_type > CURVE_CUSTOM) loaded.curve_type = CURVE_LINEAR;
+    if (loaded.curve_points[0] > loaded.curve_points[1] ||
+        loaded.curve_points[1] > loaded.curve_points[2] || loaded.curve_points[2] > 100) {
+        memcpy(loaded.curve_points, linear_points, sizeof(linear_points));
+    }
     if (loaded.filter_type >= FILTER_TYPE_COUNT) loaded.filter_type = FILTER_TYPE_ONE_EURO;
     loaded.spike_filter = loaded.spike_filter ? 1 : 0;
 
+    loaded.crc32 = config_calc_crc(&loaded);
     memcpy(cfg, &loaded, sizeof(pedal_config_t));
     return true;
 }

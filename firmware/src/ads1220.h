@@ -35,8 +35,8 @@ extern "C" {
 // Регистр 1: DR = 330 SPS, Normal mode, Continuous conversion (0x84)
 #define ADS1220_REG1_CONFIG    0x84
 
-// Регистр 2: VREF = AVDD/AGND (ратиометрический режим), FIR = 50/60Hz, PSW = open, IDAC = off (0xD0)
-#define ADS1220_REG2_CONFIG    0xD0
+// Регистр 2: VREF = AVDD/AGND (ратиометрический режим), FIR[1:0] = 00 при 330 SPS, PSW = open, IDAC = off
+#define ADS1220_REG2_CONFIG    0xC0
 
 // Регистр 3: IDAC отключен, DRDY на выделенном выводе (0x00)
 #define ADS1220_REG3_CONFIG    0x00
